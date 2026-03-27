@@ -2,8 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { listenAuction, placeBid, listenRecords, listenPlayers } from '../firebase/services';
 import { doc, onSnapshot, getDoc } from 'firebase/firestore';
-import { db, auth } from '../firebase/config';
-import { sendEmailVerification } from 'firebase/auth';
+import { db } from '../firebase/config';
 import toast from 'react-hot-toast';
 
 const BID_INCREMENTS = [500, 1000, 2000];
@@ -22,6 +21,7 @@ export default function PlayerDashboard() {
   // --- PROFIT CALCULATION LOGIC ---
   const calculateTotalProfit = () => {
     return records.reduce((total, rec) => {
+      // If I am NOT the winner of that specific month, I get a share of that winning bid
       if (rec.winnerName !== playerData?.name) {
         const share = (rec.winningBid || 0) / (rec.playerCount || 1);
         return total + share;
@@ -68,33 +68,6 @@ export default function PlayerDashboard() {
     return () => clearInterval(timer);
   }, [auction]);
 
-  // --- EMAIL VERIFICATION CHECK ---
-  if (!user.emailVerified) {
-    return (
-      <div className="page" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px' }}>
-        <div className="card" style={{ textAlign: 'center', maxWidth: '400px' }}>
-          <div style={{ fontSize: '3rem', marginBottom: '10px' }}>📧</div>
-          <h2>Verify Your Email</h2>
-          <p style={{ fontSize: '0.9rem', opacity: 0.7, margin: '15px 0' }}>
-            To keep the BC Circle secure, we need you to verify your email address: <strong>{user.email}</strong>
-          </p>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            <button className="btn btn-primary btn-full" onClick={() => window.location.reload()}>
-              I've Verified (Refresh)
-            </button>
-            <button className="btn btn-ghost btn-sm" onClick={async () => {
-              await sendEmailVerification(auth.currentUser);
-              toast.success("Verification link resent!");
-            }}>
-              Resend Link
-            </button>
-            <button className="btn btn-ghost btn-sm" onClick={logout} style={{ color: '#ff4d4d' }}>Logout</button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   const myNextBid = auction ? (auction.currentBid || 0) + selectedIncrement : 0;
   const isCurrentLeader = auction?.currentBidder === user?.uid;
 
@@ -107,16 +80,17 @@ export default function PlayerDashboard() {
 
   const handleBid = async () => {
     if (!canBid) return;
+    
     setBidding(true);
     try {
       const auctionRef = doc(db, 'auction', 'current');
-      const snap = await getDoc(auctionRef);
+      const snap = await getDoc(auctionRef); 
       const latestAuction = snap.data();
 
       if (!latestAuction.active || latestAuction.closed) {
         toast.error("Auction has already ended!");
         setBidding(false);
-        return;
+        return; 
       }
 
       await placeBid(user.uid, playerData.name, myNextBid, false);
@@ -149,13 +123,16 @@ export default function PlayerDashboard() {
           {auction?.closed && auction?.result && showWinnerCard && (
             <div className="card" style={{ textAlign: 'center', border: '2px solid var(--gold)', background: 'rgba(212, 175, 55, 0.05)', padding: '30px 20px', marginBottom: '20px', position: 'relative' }}>
               <button onClick={() => setShowWinnerCard(false)} style={{ position: 'absolute', top: '10px', right: '15px', background: 'none', border: 'none', color: '#666', fontSize: '1.2rem', cursor: 'pointer' }}>✕</button>
+              
               <div style={{ fontSize: '3.5rem' }}>🎊</div>
               <h2 style={{ color: 'var(--gold)', margin: '10px 0' }}>{auction.result.winnerName} Won!</h2>
+              
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '20px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px', background: 'rgba(255,255,255,0.05)', borderRadius: '8px', border: '1px solid #333' }}>
                   <span style={{ opacity: 0.7, fontSize: '0.9rem' }}>Winning Bid:</span>
                   <span style={{ fontWeight: 'bold', color: 'var(--gold)' }}>₹{auction.result.winningBid?.toLocaleString('en-IN')}</span>
                 </div>
+
                 <div style={{ display: 'flex', justifyContent: 'space-between', padding: '15px', background: 'rgba(74, 222, 128, 0.1)', borderRadius: '8px', border: '1px solid #4ade80' }}>
                   <div style={{ textAlign: 'left' }}>
                     <div style={{ color: '#4ade80', fontWeight: 'bold' }}>Final Payout</div>
@@ -163,6 +140,7 @@ export default function PlayerDashboard() {
                   </div>
                   <span style={{ color: '#4ade80', fontSize: '1.6rem', fontWeight: '800' }}>₹{auction.result.winnerReceives?.toLocaleString('en-IN')}</span>
                 </div>
+
                 <div style={{ display: 'flex', justifyContent: 'space-between', padding: '15px', background: 'rgba(56, 189, 248, 0.1)', borderRadius: '8px', border: '1px solid #0ea5e9' }}>
                   <div style={{ textAlign: 'left' }}>
                     <div style={{ color: '#0ea5e9', fontWeight: 'bold' }}>Your Share</div>
@@ -302,6 +280,7 @@ export default function PlayerDashboard() {
                 {records.map((r, i) => {
                   const isMe = r.winnerName === playerData?.name;
                   const myProfitShare = Math.floor((r.winningBid || 0) / (r.playerCount || 1));
+                  
                   return (
                     <tr key={i} style={{ borderBottom: '1px solid #222' }}>
                       <td style={{ padding: '15px 0', fontSize: '0.85rem' }}>{r.month}</td>
