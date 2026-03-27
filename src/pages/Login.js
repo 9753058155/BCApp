@@ -50,16 +50,6 @@ export default function Login() {
         <button className="btn btn-primary btn-full" onClick={login}>
           Login
         </button>
-
-        <div style={{ textAlign: 'center', marginTop: '15px' }}>
-          <button 
-            className="btn btn-ghost btn-sm" 
-            onClick={() => navigate("/forgot-password")}
-            style={{ fontSize: '0.8rem' }}
-          >
-            Forgot Password?
-          </button>
-        </div>
       </div>
     </div>
   );
