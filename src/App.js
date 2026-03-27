@@ -6,6 +6,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import Login from "./pages/Login";
 import AdminDashboard from "./pages/AdminDashboard";
 import PlayerDashboard from "./pages/PlayerDashboard";
+import { Toaster } from 'react-hot-toast';
 
 function App() {
   const { user, role, loading } = useContext(AuthContext);
