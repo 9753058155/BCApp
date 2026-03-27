@@ -167,13 +167,6 @@ export default function AdminDashboard() {
           </table>
         </div>
       </div>
-
-      {/* 4. MAINTENANCE BUTTON */}
-      <div style={{ marginTop: '40px', textAlign: 'center' }}>
-        <button className="btn btn-ghost" style={{ color: '#ff4d4d', fontSize: '0.8rem' }} onClick={handleMaintenanceReset}>
-          Reset All Data (End of Cycle)
-        </button>
-      </div>
     </div>
   );
 }

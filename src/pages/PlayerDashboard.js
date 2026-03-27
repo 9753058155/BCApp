@@ -128,13 +128,48 @@ export default function PlayerDashboard() {
             )}
 
             {auction?.closed && (
-              <div className="card winner-card" style={{ textAlign: 'center', background: 'var(--bg-raised)', border: '2px solid var(--gold)' }}>
-                <div style={{ fontSize: '3rem', marginBottom: '10px' }}>🎊</div>
-                <h3 style={{ textTransform: 'uppercase', letterSpacing: '1px' }}>{auction.result?.month} Winner</h3>
-                <h2 style={{ color: 'var(--gold)', fontSize: '2.5rem', margin: '10px 0' }}>{auction.result?.winnerName}</h2>
-                <p style={{ fontSize: '1.2rem' }}>Total Received: <b style={{ color: '#4ade80' }}>₹{auction.result?.winnerReceives.toLocaleString('en-IN')}</b></p>
-              </div>
-            )}
+  <div className="card winner-card" style={{ 
+    textAlign: 'center', 
+    background: 'linear-gradient(145deg, #1a1a1a, #2a2a2a)', 
+    border: '2px solid var(--gold)',
+    padding: '25px'
+  }}>
+    <div style={{ fontSize: '3rem' }}>🎊</div>
+    <h3 style={{ color: 'var(--text-muted)', marginBottom: '5px' }}>{auction.result?.month} WINNER</h3>
+    <h2 style={{ color: 'var(--gold)', fontSize: '2.5rem', margin: '10px 0' }}>{auction.result?.winnerName}</h2>
+
+    <div style={{ marginTop: '20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+      
+      {/* 1. THE WINNING BID */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #333', paddingBottom: '8px' }}>
+        <span style={{ opacity: 0.7 }}>Winning Bid:</span>
+        <span style={{ fontWeight: 'bold' }}>₹{auction.result?.winningBid?.toLocaleString('en-IN')}</span>
+      </div>
+
+      {/* 2. THE TOTAL PROFIT (This is what players save/get) */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #333', paddingBottom: '8px' }}>
+        <span style={{ opacity: 0.7 }}>Total Profit Distributed:</span>
+        <span style={{ color: 'var(--gold)', fontWeight: 'bold' }}>₹{auction.result?.winningBid?.toLocaleString('en-IN')}</span>
+      </div>
+
+      {/* 3. PER PLAYER PROFIT */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px', background: 'rgba(74, 222, 128, 0.1)', borderRadius: '8px' }}>
+        <span style={{ color: '#4ade80' }}>Each Player Profits:</span>
+        <span style={{ color: '#4ade80', fontWeight: 'bold' }}>
+          ₹{(auction.result?.winningBid / 10).toLocaleString('en-IN')}
+        </span>
+      </div>
+
+      <div style={{ marginTop: '15px', padding: '15px', background: 'rgba(255,255,255,0.05)', borderRadius: '10px' }}>
+        <div style={{ fontSize: '0.8rem', opacity: 0.6 }}>WINNER TAKES HOME</div>
+        <div style={{ fontSize: '2rem', fontWeight: '800', color: 'white' }}>
+          ₹{auction.result?.winnerReceives?.toLocaleString('en-IN')}
+        </div>
+      </div>
+      
+    </div>
+  </div>
+)}
           </>
         ) : (
           <div className="card">
