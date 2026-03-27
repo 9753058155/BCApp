@@ -1,52 +1,66 @@
 import { useState } from "react";
 import { signInWithEmailAndPassword } from "firebase/auth";
 import { auth } from "../firebase/config";
+import { useNavigate } from "react-router-dom";
+import toast from 'react-hot-toast';
 
 export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const navigate = useNavigate();
 
   const login = async () => {
     try {
       await signInWithEmailAndPassword(auth, email, password);
+      toast.success("Welcome back!");
     } catch (err) {
-      alert(err.message);
+      toast.error(err.message);
     }
   };
 
   return (
-  <div className="page">
-    <div className="card">
-      <div className="card-header">
-        <div>
-          <div className="card-title">BC Auction</div>
-          <div className="navbar-sub">Sign in to continue</div>
+    <div className="page">
+      <div className="card">
+        <div className="card-header">
+          <div>
+            <div className="card-title">BC Auction</div>
+            <div className="navbar-sub">Sign in to continue</div>
+          </div>
+        </div>
+
+        <div className="form-group">
+          <label className="form-label">Email</label>
+          <input
+            className="form-input"
+            placeholder="Enter email"
+            onChange={(e) => setEmail(e.target.value)}
+          />
+        </div>
+
+        <div className="form-group">
+          <label className="form-label">Password</label>
+          <input
+            type="password"
+            className="form-input"
+            placeholder="Enter password"
+            onChange={(e) => setPassword(e.target.value)}
+          />
+        </div>
+
+        <button className="btn btn-primary btn-full" onClick={login}>
+          Login
+        </button>
+
+        <div style={{ textAlign: 'center', marginTop: '15px' }}>
+          <button 
+            className="btn btn-ghost btn-sm" 
+            onClick={() => navigate("/forgot-password")}
+            style={{ fontSize: '0.8rem' }}
+          >
+            Forgot Password?
+          </button>
         </div>
       </div>
-
-      <div className="form-group">
-        <label className="form-label">Email</label>
-        <input
-          className="form-input"
-          placeholder="Enter email"
-          onChange={(e) => setEmail(e.target.value)}
-        />
-      </div>
-
-      <div className="form-group">
-        <label className="form-label">Password</label>
-        <input
-          type="password"
-          className="form-input"
-          placeholder="Enter password"
-          onChange={(e) => setPassword(e.target.value)}
-        />
-      </div>
-
-      <button className="btn btn-primary btn-full" onClick={login}>
-        Login
-      </button>
     </div>
-  </div>
-);
+  );
 }

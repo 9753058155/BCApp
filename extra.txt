@@ -1,0 +1,85 @@
+export const closeAuction = async (auctionData) => {
+  if (!auctionData.currentBidder) {
+    await updateDoc(doc(db, 'auction', 'current'), { active: false, closed: false });
+    return;
+  }
+
+  const winningBid = auctionData.currentBid;
+  const totalPool = auctionData.totalPool;
+  const playerCount = auctionData.totalPlayers;
+
+  const result = {
+    month: auctionData.month,
+    winnerId: auctionData.currentBidder,
+    winnerName: auctionData.currentBidderName,
+    winningBid: winningBid,
+    totalPool: totalPool,
+    playerCount: playerCount,
+    winnerReceives: totalPool - winningBid,
+    profitPerPlayer: Math.floor(winningBid / playerCount),
+    closedAt: new Date().toISOString()
+  };
+
+  // Save to permanent records
+  await setDoc(doc(db, 'records', `${auctionData.month}-${Date.now()}`), result);
+  
+  // Close the current auction and attach results for players to see
+  await updateDoc(doc(db, 'auction', 'current'), { 
+    active: false, 
+    closed: true, 
+    result: result 
+  });
+
+  // Mark player as having won this cycle
+  await updateDoc(doc(db, 'players', auctionData.currentBidder), { 
+    hasWon: true, 
+    wonMonth: auctionData.month 
+  });
+
+  return result;
+};
+
+
+
+
+
+
+
+
+<>
+          <div className="card" style={{ 
+            background: 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)', 
+            border: '1px solid #38bdf8',
+            padding: '25px',
+            textAlign: 'center',
+            marginBottom: '20px'
+          }}>
+            <div style={{ color: '#38bdf8', fontSize: '0.75rem', fontWeight: 'bold', letterSpacing: '1px' }}>TOTAL ACCUMULATED PROFIT</div>
+            <div style={{ fontSize: '2.5rem', fontWeight: '900', color: 'white', margin: '10px 0' }}>
+              ₹{Math.floor(calculateTotalProfit()).toLocaleString('en-IN')}
+            </div>
+            <p style={{ opacity: 0.6, fontSize: '0.7rem' }}>Extra money you've earned from others' bids across all rounds.</p>
+          </div>
+
+          <div className="card">
+            <h3 style={{ fontSize: '1rem', marginBottom: '15px' }}>Monthly History</h3>
+            <table className="records-table" style={{ width: '100%' }}>
+              <thead>
+                <tr style={{ textAlign: 'left', opacity: 0.5, fontSize: '0.8rem' }}>
+                  <th>MONTH</th><th>WINNER</th><th style={{ textAlign: 'right' }}>YOUR PROFIT</th>
+                </tr>
+              </thead>
+              <tbody>
+                {records.map((r, i) => (
+                  <tr key={i} style={{ borderBottom: '1px solid #222' }}>
+                    <td style={{ padding: '12px 0', fontSize: '0.85rem' }}>{r.month}</td>
+                    <td style={{ fontSize: '0.85rem' }}>{r.winnerName}</td>
+                    <td style={{ textAlign: 'right', color: r.winnerName === playerData?.name ? '#666' : '#4ade80', fontWeight: 'bold', fontSize: '0.85rem' }}>
+                      {r.winnerName === playerData?.name ? 'WON' : `+₹${Math.floor(r.winningBid / r.playerCount)}`}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>

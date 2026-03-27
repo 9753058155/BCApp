@@ -4,8 +4,9 @@ import { AuthContext } from "./context/AuthContext";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 
 import Login from "./pages/Login";
+import ForgotPassword from "./pages/ForgotPassword"; // New Import
 import AdminDashboard from "./pages/AdminDashboard";
-import PlayerDashboard from "./pages/PlayerDashboard"; // Changed from Auction
+import PlayerDashboard from "./pages/PlayerDashboard";
 
 function App() {
   const { user, role, loading } = useContext(AuthContext);
@@ -18,6 +19,7 @@ function App() {
         {!user ? (
           <>
             <Route path="/login" element={<Login />} />
+            <Route path="/forgot-password" element={<ForgotPassword />} />
             <Route path="*" element={<Navigate to="/login" />} />
           </>
         ) : role === "admin" ? (

@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { auth, db } from "../firebase/config";
-import { doc, getDoc } from "firebase/firestore";
+import { doc, getDoc, onSnapshot } from "firebase/firestore";
 import toast from 'react-hot-toast';
 
 export const AuthContext = createContext();
@@ -22,35 +22,31 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (u) => {
-      if (u) {
-        const playerRef = doc(db, "players", u.uid);
-        const playerSnap = await getDoc(playerRef);
-        
-        if (playerSnap.exists()) {
-          const data = playerSnap.data();
-          setUser(u);
+ useEffect(() => {
+  const unsubscribeAuth = onAuthStateChanged(auth, (u) => {
+    if (u) {
+      setUser(u);
+      // REAL-TIME PLAYER DATA LISTENER
+      // This ensures if 'hasWon' changes, the phone updates INSTANTLY
+      const unsubDoc = onSnapshot(doc(db, "players", u.uid), (snap) => {
+        if (snap.exists()) {
+          const data = snap.data();
           setPlayerData(data);
           setRole(data.isAdmin ? "admin" : "player");
-        } else {
-          // SECURITY GUARD: If the player document is gone, they are deleted
-          await signOut(auth);
-          setUser(null);
-          setRole(null);
-          setPlayerData(null);
-          toast.error("Account removed by admin.");
         }
-      } else {
-        setUser(null);
-        setRole(null);
-        setPlayerData(null);
-      }
+        setLoading(false);
+      });
+      return () => unsubDoc();
+    } else {
+      setUser(null);
+      setRole(null);
+      setPlayerData(null);
       setLoading(false);
-    });
+    }
+  });
 
-    return () => unsubscribe();
-  }, []);
+  return () => unsubscribeAuth();
+}, []);
 
   return (
     <AuthContext.Provider value={{ user, role, playerData, loading, logout }}>

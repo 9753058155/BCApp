@@ -1,5 +1,5 @@
 import { 
-  doc, getDoc, setDoc, updateDoc, onSnapshot, collection, getDocs, query, where, orderBy, deleteDoc 
+  doc, getDoc, setDoc, updateDoc, onSnapshot, collection, getDocs, query, where, orderBy, deleteDoc, writeBatch 
 } from 'firebase/firestore';
 import { signInWithEmailAndPassword, signOut, createUserWithEmailAndPassword } from 'firebase/auth';
 import { secondaryAuth, db, auth } from './config';
@@ -31,9 +31,22 @@ export const addPlayer = async (email, password, name) => {
   await signOut(secondaryAuth);
 
   await setDoc(doc(db, "players", uid), {
-    uid, name, email, isAdmin: false, hasWon: false, wonMonth: null, createdAt: new Date().toISOString()
+    uid, 
+    name, 
+    email, 
+    isAdmin: false, 
+    hasWon: false, 
+    isPaid: false, // Initialize as unpaid
+    wonMonth: null, 
+    createdAt: new Date().toISOString()
   });
   return uid;
+};
+
+export const togglePaidStatus = async (playerId, currentStatus) => {
+  await updateDoc(doc(db, "players", playerId), {
+    isPaid: !currentStatus
+  });
 };
 
 export const deletePlayer = async (playerId) => {
@@ -42,7 +55,6 @@ export const deletePlayer = async (playerId) => {
 
 // ─── AUCTION ────────────────────────────────────────────────────────────────
 export const listenAuction = (callback) => {
-  // includeMetadataChanges: false ensures we only react to server-confirmed data
   return onSnapshot(doc(db, 'auction', 'current'), { includeMetadataChanges: false }, (snap) => {
     callback(snap.exists() ? snap.data() : null);
   });
@@ -52,6 +64,9 @@ export const startAuction = async (settings) => {
   const { monthlyAmount, totalPlayers } = settings;
   const minBid = Math.floor(monthlyAmount * 0.1);
   const totalPool = monthlyAmount * totalPlayers;
+
+  // 15 Minutes Timer
+  const endTime = Date.now() + (15 * 60 * 1000);
 
   const auctionData = {
     active: true, 
@@ -65,6 +80,7 @@ export const startAuction = async (settings) => {
     totalPool,
     monthlyAmount, 
     totalPlayers, 
+    endTime, 
     bids: [], 
     result: null
   };
@@ -81,14 +97,12 @@ export const placeBid = async (uid, playerName, amount, isAdmin) => {
   const data = snap.data();
   if (!data.active || data.closed) throw new Error('Auction is closed');
   
-  // Critical check for high-speed bidding: ensure bid is still higher than latest server value
   if (amount <= data.currentBid) throw new Error(`Someone already bid ₹${data.currentBid}`);
   
   await updateDoc(auctionRef, {
     currentBid: amount,
     currentBidder: uid,
     currentBidderName: playerName,
-    // SPEED OPTIMIZATION: Keep only the last 15 bids to keep the document small/fast
     bids: [...(data.bids || []).slice(-14), { 
       uid, 
       playerName, 
@@ -99,44 +113,63 @@ export const placeBid = async (uid, playerName, amount, isAdmin) => {
 };
 
 export const closeAuction = async (auctionData) => {
-  if (!auctionData.currentBidder) {
-    await updateDoc(doc(db, 'auction', 'current'), { active: false, closed: false });
-    return;
-  }
+  if (!auctionData || !auctionData.active) return;
 
-  const winningBid = auctionData.currentBid;
-  const totalPool = auctionData.totalPool;
-  const playerCount = auctionData.totalPlayers;
+  let winnerId = auctionData.currentBidder;
+  let winnerName = auctionData.currentBidderName;
+  let winningBid = auctionData.currentBid;
+
+  // RANDOM SELECTION: If no one bid, pick a random ELIGIBLE player (Paid + Not Won)
+  if (!winnerId) {
+    const playersSnap = await getDocs(collection(db, 'players'));
+    const eligible = playersSnap.docs
+      .map(d => d.data())
+      .filter(p => !p.isAdmin && !p.hasWon && p.isPaid === true); 
+
+    if (eligible.length > 0) {
+      const random = eligible[Math.floor(Math.random() * eligible.length)];
+      winnerId = random.uid;
+      winnerName = random.name;
+      winningBid = auctionData.minBid; 
+    } else {
+      // If no one is eligible (no one paid), stop auction without a winner
+      await updateDoc(doc(db, 'auction', 'current'), { active: false, closed: false });
+      return;
+    }
+  }
 
   const result = {
     month: auctionData.month,
-    winnerId: auctionData.currentBidder,
-    winnerName: auctionData.currentBidderName,
+    winnerName: winnerName,
     winningBid: winningBid,
-    totalPool: totalPool,
-    playerCount: playerCount,
-    winnerReceives: totalPool - winningBid,
-    profitPerPlayer: Math.floor(winningBid / playerCount),
+    winnerReceives: auctionData.totalPool - winningBid,
+    profitPerPlayer: Math.floor(winningBid / auctionData.totalPlayers),
+    playerCount: auctionData.totalPlayers,
     closedAt: new Date().toISOString()
   };
 
-  // Save to permanent records
-  await setDoc(doc(db, 'records', `${auctionData.month}-${Date.now()}`), result);
+  // --- BATCH UPDATE FOR SPEED AND PAYMENT RESET ---
+  const batch = writeBatch(db);
+
+  // 1. Save Winner Record
+  const recordRef = doc(db, 'records', `${auctionData.month}-${Date.now()}`);
+  batch.set(recordRef, result);
   
-  // Close the current auction and attach results for players to see
-  await updateDoc(doc(db, 'auction', 'current'), { 
-    active: false, 
-    closed: true, 
-    result: result 
+  // 2. Update Auction Status
+  const auctionRef = doc(db, 'auction', 'current');
+  batch.update(auctionRef, { active: false, closed: true, result });
+  
+  // 3. Mark the Winner
+  const winnerRef = doc(db, 'players', winnerId);
+  batch.update(winnerRef, { hasWon: true, wonMonth: auctionData.month });
+
+  // 4. RESET ALL PAYMENTS (Checkboxes) FOR EVERYONE
+  const allPlayers = await getDocs(collection(db, 'players'));
+  allPlayers.docs.forEach(p => {
+    batch.update(doc(db, 'players', p.id), { isPaid: false });
   });
 
-  // Mark player as having won this cycle
-  await updateDoc(doc(db, 'players', auctionData.currentBidder), { 
-    hasWon: true, 
-    wonMonth: auctionData.month 
-  });
-
-  return result;
+  await batch.commit();
 };
 
 // ─── RECORDS & MAINTENANCE ──────────────────────────────────────────────────
@@ -148,19 +181,17 @@ export const listenRecords = (callback) => {
 export const resetAllWins = async () => {
   const q = query(collection(db, 'players'), where('isAdmin', '==', false));
   const snap = await getDocs(q);
-  
-  const promises = snap.docs.map(d => 
-    updateDoc(doc(db, 'players', d.id), {
-      hasWon: false,
-      wonMonth: null
-    })
-  );
-  await Promise.all(promises);
+  const batch = writeBatch(db);
+  snap.docs.forEach(d => {
+    batch.update(doc(db, 'players', d.id), { hasWon: false, wonMonth: null });
+  });
+  await batch.commit();
 };
 
 export const clearAllRecords = async () => {
   const snap = await getDocs(collection(db, 'records'));
-  const promises = snap.docs.map(d => deleteDoc(doc(db, 'records', d.id)));
-  await Promise.all(promises);
-  await deleteDoc(doc(db, 'auction', 'current'));
+  const batch = writeBatch(db);
+  snap.docs.forEach(d => batch.delete(doc(db, 'records', d.id)));
+  batch.delete(doc(db, 'auction', 'current'));
+  await batch.commit();
 };
