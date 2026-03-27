@@ -1,0 +1,22 @@
+{
+  "rules": {
+    "players": {
+      ".read": "auth != null",
+      "$uid": {
+        ".write": "auth != null && (auth.uid === $uid || root.child('players').child(auth.uid).child('isAdmin').val() === true)"
+      }
+    },
+    "settings": {
+      ".read": "auth != null",
+      ".write": "auth != null && root.child('players').child(auth.uid).child('isAdmin').val() === true"
+    },
+    "auction": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "records": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    }
+  }
+}
