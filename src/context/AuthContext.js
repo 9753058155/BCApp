@@ -1,20 +1,19 @@
 import { createContext, useContext, useEffect, useState } from "react";
-import { onAuthStateChanged, signOut } from "firebase/auth"; // Import signOut
+import { onAuthStateChanged, signOut } from "firebase/auth";
 import { auth, db } from "../firebase/config";
-import { doc, getDoc } from "firebase/firestore"; // Import Firestore methods
+import { doc, getDoc } from "firebase/firestore";
+import toast from 'react-hot-toast';
 
 export const AuthContext = createContext();
 
-// Custom hook for easier usage in components
 export const useAuth = () => useContext(AuthContext);
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
-  const [playerData, setPlayerData] = useState(null); // Stores the full player object
+  const [playerData, setPlayerData] = useState(null);
   const [role, setRole] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // --- LOGOUT FUNCTION ---
   const logout = async () => {
     try {
       await signOut(auth);
@@ -25,9 +24,7 @@ export const AuthProvider = ({ children }) => {
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (u) => {
-      setLoading(true);
       if (u) {
-        // Fetch user/player data from Firestore 'players' collection
         const playerRef = doc(db, "players", u.uid);
         const playerSnap = await getDoc(playerRef);
         
@@ -35,12 +32,14 @@ export const AuthProvider = ({ children }) => {
           const data = playerSnap.data();
           setUser(u);
           setPlayerData(data);
-          // If the player has an isAdmin flag, set role to admin, otherwise player
           setRole(data.isAdmin ? "admin" : "player");
         } else {
-          // If no player doc exists, fallback to basic user but no role
-          setUser(u);
+          // SECURITY GUARD: If the player document is gone, they are deleted
+          await signOut(auth);
+          setUser(null);
           setRole(null);
+          setPlayerData(null);
+          toast.error("Account removed by admin.");
         }
       } else {
         setUser(null);

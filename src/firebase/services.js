@@ -42,7 +42,8 @@ export const deletePlayer = async (playerId) => {
 
 // ─── AUCTION ────────────────────────────────────────────────────────────────
 export const listenAuction = (callback) => {
-  return onSnapshot(doc(db, 'auction', 'current'), (snap) => {
+  // includeMetadataChanges: false ensures we only react to server-confirmed data
+  return onSnapshot(doc(db, 'auction', 'current'), { includeMetadataChanges: false }, (snap) => {
     callback(snap.exists() ? snap.data() : null);
   });
 };
@@ -51,13 +52,21 @@ export const startAuction = async (settings) => {
   const { monthlyAmount, totalPlayers } = settings;
   const minBid = Math.floor(monthlyAmount * 0.1);
   const totalPool = monthlyAmount * totalPlayers;
-  const endsAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
 
   const auctionData = {
-    active: true, closed: false, month: new Date().toISOString().slice(0, 7),
-    startedAt: new Date().toISOString(), endsAt, currentBid: minBid,
-    currentBidder: null, currentBidderName: null, minBid, totalPool,
-    monthlyAmount, totalPlayers, bids: [], result: null
+    active: true, 
+    closed: false, 
+    month: new Date().toLocaleString('default', { month: 'long', year: 'numeric' }),
+    startedAt: new Date().toISOString(), 
+    currentBid: minBid,
+    currentBidder: null, 
+    currentBidderName: null, 
+    minBid, 
+    totalPool,
+    monthlyAmount, 
+    totalPlayers, 
+    bids: [], 
+    result: null
   };
   await setDoc(doc(db, 'auction', 'current'), auctionData);
 };
@@ -71,33 +80,62 @@ export const placeBid = async (uid, playerName, amount, isAdmin) => {
   
   const data = snap.data();
   if (!data.active || data.closed) throw new Error('Auction is closed');
-  if (amount <= data.currentBid) throw new Error(`Bid must be more than ₹${data.currentBid}`);
+  
+  // Critical check for high-speed bidding: ensure bid is still higher than latest server value
+  if (amount <= data.currentBid) throw new Error(`Someone already bid ₹${data.currentBid}`);
   
   await updateDoc(auctionRef, {
     currentBid: amount,
     currentBidder: uid,
     currentBidderName: playerName,
-    bids: [...(data.bids || []), { uid, playerName, amount, timestamp: new Date().toISOString() }]
+    // SPEED OPTIMIZATION: Keep only the last 15 bids to keep the document small/fast
+    bids: [...(data.bids || []).slice(-14), { 
+      uid, 
+      playerName, 
+      amount, 
+      timestamp: Date.now() 
+    }]
   });
 };
 
 export const closeAuction = async (auctionData) => {
+  if (!auctionData.currentBidder) {
+    await updateDoc(doc(db, 'auction', 'current'), { active: false, closed: false });
+    return;
+  }
+
+  const winningBid = auctionData.currentBid;
+  const totalPool = auctionData.totalPool;
+  const playerCount = auctionData.totalPlayers;
+
   const result = {
     month: auctionData.month,
     winnerId: auctionData.currentBidder,
     winnerName: auctionData.currentBidderName,
-    winningBid: auctionData.currentBid,
-    winnerReceives: auctionData.totalPool - auctionData.currentBid,
-    perPlayerBonus: Math.floor(auctionData.currentBid / auctionData.totalPlayers),
-    totalPool: auctionData.totalPool,
+    winningBid: winningBid,
+    totalPool: totalPool,
+    playerCount: playerCount,
+    winnerReceives: totalPool - winningBid,
+    profitPerPlayer: Math.floor(winningBid / playerCount),
     closedAt: new Date().toISOString()
   };
 
+  // Save to permanent records
   await setDoc(doc(db, 'records', `${auctionData.month}-${Date.now()}`), result);
-  await updateDoc(doc(db, 'auction', 'current'), { active: false, closed: true, result });
-  if (auctionData.currentBidder) {
-    await updateDoc(doc(db, 'players', auctionData.currentBidder), { hasWon: true, wonMonth: auctionData.month });
-  }
+  
+  // Close the current auction and attach results for players to see
+  await updateDoc(doc(db, 'auction', 'current'), { 
+    active: false, 
+    closed: true, 
+    result: result 
+  });
+
+  // Mark player as having won this cycle
+  await updateDoc(doc(db, 'players', auctionData.currentBidder), { 
+    hasWon: true, 
+    wonMonth: auctionData.month 
+  });
+
   return result;
 };
 
@@ -114,9 +152,7 @@ export const resetAllWins = async () => {
   const promises = snap.docs.map(d => 
     updateDoc(doc(db, 'players', d.id), {
       hasWon: false,
-      wonMonth: null,
-      // Adding a timestamp forces the AuthContext listener to see a change
-      lastReset: new Date().toISOString() 
+      wonMonth: null
     })
   );
   await Promise.all(promises);

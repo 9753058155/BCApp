@@ -17,8 +17,6 @@ export default function AdminDashboard() {
   const [auction, setAuction] = useState(null);
   const [players, setPlayers] = useState([]);
   const [settings, setSettings] = useState({ monthlyAmount: 5000, totalPlayers: 10 });
-  
-  // Form State
   const [newPlayer, setNewPlayer] = useState({ name: '', email: '', password: '' });
   const [loading, setLoading] = useState(false);
 
@@ -26,7 +24,6 @@ export default function AdminDashboard() {
     const unsubs = [
       listenAuction(setAuction),
       listenPlayers((data) => {
-        // FILTER: Only show members who are NOT admins
         const familyOnly = data.filter(p => p.isAdmin !== true);
         setPlayers(familyOnly);
       })
@@ -59,26 +56,31 @@ export default function AdminDashboard() {
     }
   };
 
-  const handleMaintenanceReset = async () => {
-    if (window.confirm("⚠️ This will wipe all records and reset all winners. Continue?")) {
+  const handleMakeAllEligible = async () => {
+    if (window.confirm("Make all players eligible for bidding again?")) {
+      try {
+        await resetAllWins();
+        toast.success("All players are now eligible!");
+      } catch (err) { toast.error("Operation failed"); }
+    }
+  };
+
+  const handleResetCycle = async () => {
+    if (window.confirm("🚨 This will wipe all auction history records. Continue?")) {
       try {
         await clearAllRecords();
-        await resetAllWins();
-        toast.success("System Reset!");
-      } catch (err) {
-        toast.error("Reset failed");
-      }
+        toast.success("Cycle history cleared!");
+      } catch (err) { toast.error("Reset failed"); }
     }
   };
 
   return (
-    <div className="page-wide" style={{ maxWidth: '800px', margin: '0 auto' }}>
-      <div className="navbar">
+    <div className="page-wide" style={{ maxWidth: '800px', margin: '0 auto', padding: '20px' }}>
+      <div className="navbar" style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
         <div className="navbar-brand">👑 Admin Dashboard</div>
         <button className="btn btn-danger btn-sm" onClick={logout}>Logout</button>
       </div>
 
-      {/* 1. ADD PLAYER SECTION */}
       <div className="card" style={{ marginBottom: '20px' }}>
         <h3 className="card-title">Add New Family Member</h3>
         <form onSubmit={handleAddPlayer} style={{ marginTop: '15px', display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
@@ -94,78 +96,64 @@ export default function AdminDashboard() {
         </form>
       </div>
 
-      {/* 2. AUCTION CONTROL SECTION */}
       <div className="card" style={{ textAlign: 'center', marginBottom: '20px', padding: '30px' }}>
         <h3 className="card-title">Auction Control</h3>
         {auction?.active ? (
           <div style={{ marginTop: '20px' }}>
             <div className="badge badge-green">LIVE</div>
-            <h1 style={{ fontSize: '3rem', color: 'var(--gold)', margin: '15px 0' }}>
+            <h1 style={{ fontSize: '3.5rem', color: 'var(--gold)', margin: '15px 0' }}>
               ₹{auction.currentBid?.toLocaleString('en-IN')}
             </h1>
-            <p>Current Bidder: <b>{auction.currentBidderName || "No Bids"}</b></p>
+            <p>Leader: <b>{auction.currentBidderName || "No Bids"}</b></p>
             <button className="btn btn-danger btn-full" style={{marginTop: '20px'}} onClick={() => closeAuction(auction)}>
               End Auction & Save Winner
             </button>
           </div>
         ) : (
-          <div style={{ marginTop: '20px', display: 'flex', justifyContent: 'center', alignItems: 'flex-end', gap: '15px' }}>
-            <div style={{ textAlign: 'left' }}>
-              <label className="form-label">Monthly BC Amount</label>
-              <input type="number" className="form-input" value={settings.monthlyAmount} 
-                onChange={e => setSettings({...settings, monthlyAmount: Number(e.target.value)})} style={{ width: '150px' }} />
+          <div style={{ marginTop: '20px' }}>
+            <div style={{ display: 'flex', justifyContent: 'center', gap: '15px', marginBottom: '15px' }}>
+              <div style={{ textAlign: 'left' }}>
+                <label className="form-label">Amount</label>
+                <input type="number" className="form-input" value={settings.monthlyAmount} 
+                  onChange={e => setSettings({...settings, monthlyAmount: Number(e.target.value)})} style={{ width: '120px' }} />
+              </div>
+              <div style={{ textAlign: 'left' }}>
+                <label className="form-label">Required Players</label>
+                <input type="number" className="form-input" value={settings.totalPlayers} 
+                  onChange={e => setSettings({...settings, totalPlayers: Number(e.target.value)})} style={{ width: '120px' }} />
+              </div>
             </div>
-            <button className="btn btn-primary" style={{ padding: '12px 30px' }} onClick={() => startAuction(settings)}>
-              Start Monthly Auction
+            {players.length !== settings.totalPlayers && (
+              <p style={{ color: '#ff8787', fontSize: '0.8rem', marginBottom: '10px' }}>
+                ⚠️ Need {settings.totalPlayers} players (Current: {players.length})
+              </p>
+            )}
+            <button className="btn btn-primary" onClick={() => startAuction(settings)} disabled={players.length !== settings.totalPlayers}>
+              Start Auction
             </button>
           </div>
         )}
       </div>
 
-      {/* 3. PLAYER LIST SECTION */}
       <div className="card">
         <h3 className="card-title">Family Members ({players.length})</h3>
-        <div style={{ marginTop: '15px', overflowX: 'auto' }}>
-          <table className="records-table">
-            <thead>
-              <tr style={{ textAlign: 'left' }}>
-                <th>Name</th>
-                <th>Email</th>
-                <th>Status</th>
-                <th>Actions</th>
+        <table className="records-table" style={{ width: '100%', marginTop: '15px' }}>
+          <thead><tr style={{ textAlign: 'left' }}><th>Name</th><th>Status</th><th>Actions</th></tr></thead>
+          <tbody>
+            {players.map(p => (
+              <tr key={p.id}>
+                <td style={{ fontWeight: 'bold' }}>{p.name}</td>
+                <td>{p.hasWon ? <span className="badge badge-green">Won</span> : <span className="badge badge-muted">Eligible</span>}</td>
+                <td><button className="btn btn-danger btn-sm" onClick={() => handleDelete(p.id, p.name)}>Delete</button></td>
               </tr>
-            </thead>
-            <tbody>
-              {players.map(p => (
-                <tr key={p.id}>
-                  <td style={{ fontWeight: 'bold' }}>{p.name}</td>
-                  <td>{p.email}</td>
-                  <td>
-                    {p.hasWon ? 
-                      <span className="badge badge-green">Won ({p.wonMonth})</span> : 
-                      <span className="badge badge-muted">Eligible</span>
-                    }
-                  </td>
-                  <td>
-                    <button 
-                      className="btn btn-danger btn-sm" 
-                      onClick={() => handleDelete(p.id, p.name)}
-                    >
-                      Delete
-                    </button>
-                  </td>
-                </tr>
-              ))}
-              {players.length === 0 && (
-                <tr>
-                  <td colSpan="4" style={{ textAlign: 'center', padding: '20px', opacity: 0.5 }}>
-                    No family members added yet.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div style={{ marginTop: '40px', display: 'flex', gap: '10px', justifyContent: 'center' }}>
+        <button className="btn btn-ghost" onClick={handleMakeAllEligible}>🔄 Make All Eligible</button>
+        <button className="btn btn-ghost" style={{color: '#ff8787'}} onClick={handleResetCycle}>🗑️ Reset Cycle</button>
       </div>
     </div>
   );
