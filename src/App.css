@@ -27,6 +27,9 @@ body {
   background-image:
     radial-gradient(ellipse at 20% 20%, rgba(201,168,76,0.07) 0%, transparent 50%),
     radial-gradient(ellipse at 80% 80%, rgba(106,61,154,0.08) 0%, transparent 50%);
+  overscroll-behavior-y: contain;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
 }
 
 h1, h2, h3 { font-family: 'Playfair Display', serif; }
@@ -386,4 +389,138 @@ button, .btn {
 }
 .bid-amount-pulse:active {
   transform: scale(1.05);
+}
+
+/* --- PREVENT REFRESH & ADD SMOOTHNESS --- */
+body {
+  overscroll-behavior-y: contain; /* Prevents pull-to-refresh bounce */
+  -webkit-overflow-scrolling: touch;
+}
+
+/* --- BID POP ANIMATION --- */
+@keyframes bidPop {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.15); color: #fff; text-shadow: 0 0 20px var(--gold); }
+  100% { transform: scale(1); }
+}
+
+.bid-updated {
+  animation: bidPop 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+/* --- SKELETON LOADERS --- */
+.skeleton {
+  background: linear-gradient(90deg, var(--bg-raised) 25%, var(--bg-card) 50%, var(--bg-raised) 75%);
+  background-size: 200% 100%;
+  animation: loading 1.5s infinite;
+  border-radius: var(--radius-sm);
+}
+
+@keyframes loading {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.loading-screen {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-deep);
+  color: var(--gold);
+}
+
+/* --- TABS SYSTEM --- */
+.tabs {
+  display: flex;
+  background: var(--bg-raised);
+  padding: 5px;
+  border-radius: var(--radius-md);
+  gap: 5px;
+  margin-bottom: 20px;
+}
+
+.tab {
+  flex: 1;
+  text-align: center;
+  padding: 12px 5px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.9rem;
+  border-radius: var(--radius-sm);
+  transition: all 0.2s ease;
+  color: var(--text-muted);
+}
+
+.tab.active {
+  background: var(--gold);
+  color: var(--bg-deep);
+}
+
+/* --- PLAYER GRID (For Quick Payment Toggle) --- */
+.players-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 12px;
+  margin-top: 15px;
+}
+
+.player-chip {
+  background: var(--bg-deep);
+  border: 1px solid var(--border);
+  padding: 10px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.player-avatar {
+  width: 30px;
+  height: 30px;
+  background: var(--gold);
+  color: var(--bg-deep);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  font-size: 0.8rem;
+}
+
+/* --- UPDATE NOTIFIER ANIMATION --- */
+@keyframes slideDown {
+  from { transform: translateY(-100%); }
+  to { transform: translateY(0); }
+}
+
+.update-bar {
+  animation: slideDown 0.4s ease-out;
+}
+
+/* --- CARDS & TABLES CLEANUP --- */
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 15px;
+}
+
+.records-table th {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  letter-spacing: 1px;
+}
+
+.badge-gold {
+  background: rgba(212, 175, 55, 0.1);
+  color: var(--gold);
+  border: 1px solid var(--gold);
+}
+
+.btn-full {
+  width: 100%;
+  justify-content: center;
 }

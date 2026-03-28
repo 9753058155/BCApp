@@ -9,52 +9,55 @@ const BID_INCREMENTS = [500, 1000, 2000];
 
 export default function PlayerDashboard() {
   const { user, playerData, logout } = useAuth();
+  
+  // --- STATE ---
   const [players, setPlayers] = useState([]); 
   const [auction, setAuction] = useState(null);
   const [records, setRecords] = useState([]);
-  const [rules, setRules] = useState(""); // Rules state
-  const [showRules, setShowRules] = useState(false); // Modal state
+  const [rules, setRules] = useState(""); 
+  const [showRules, setShowRules] = useState(false); 
   const [selectedIncrement, setSelectedIncrement] = useState(500);
   const [bidding, setBidding] = useState(false);
   const [tab, setTab] = useState('auction');
   const [timeLeft, setTimeLeft] = useState("");
   const [showWinnerCard, setShowWinnerCard] = useState(true);
+  const [updateAvailable, setUpdateAvailable] = useState(false);
 
-  // --- 1. WELCOME MESSAGE FIX (RUNS ONLY ONCE) ---
+  // --- 1. SERVICE WORKER / UPDATE CHECKER ---
+  useEffect(() => {
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.ready.then((reg) => {
+        reg.addEventListener('updatefound', () => {
+          const newWorker = reg.installing;
+          newWorker.addEventListener('statechange', () => {
+            if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+              setUpdateAvailable(true);
+            }
+          });
+        });
+      });
+    }
+  }, []);
+
+  // --- 2. WELCOME TOAST ---
   useEffect(() => {
     if (playerData?.name) {
       toast.success(`Welcome back, ${playerData.name}!`, {
-        id: 'welcome-toast', // Prevents duplicates and persistence
+        id: 'welcome-toast',
         duration: 3000
       });
     }
-  }, []); 
+  }, [playerData?.name]); 
 
-  // --- 2. RULES LISTENER (Read-Only) ---
+  // --- 3. REAL-TIME LISTENERS ---
   useEffect(() => {
+    if (!user?.uid) return;
+
     const unsubRules = onSnapshot(doc(db, 'rules', 'current'), (snap) => {
       if (snap.exists()) setRules(snap.data().content);
     });
-    return () => unsubRules();
-  }, []);
 
-  // --- 3. OPTIMIZED PROFIT LOGIC ---
-  const totalProfit = useMemo(() => {
-    return records.reduce((total, rec) => {
-      if (rec.winnerName !== playerData?.name) {
-        const share = (rec.winningBid || 0) / (rec.playerCount || 1);
-        return total + share;
-      }
-      return total;
-    }, 0);
-  }, [records, playerData?.name]);
-
-  // --- 4. LISTENERS ---
-  useEffect(() => {
-    if (!user?.uid) return;
-    let unsubAuction, unsubRecords, unsubPlayers;
-
-    unsubAuction = onSnapshot(doc(db, 'auction', 'current'), (snap) => {
+    const unsubAuction = onSnapshot(doc(db, 'auction', 'current'), (snap) => {
       if (snap.exists()) {
         const data = snap.data();
         setAuction(prev => JSON.stringify(prev) === JSON.stringify(data) ? prev : data);
@@ -63,20 +66,21 @@ export default function PlayerDashboard() {
       }
     });
 
-    unsubRecords = listenRecords(setRecords);
-    unsubPlayers = listenPlayers((data) => {
+    const unsubRecords = listenRecords(setRecords);
+    const unsubPlayers = listenPlayers((data) => {
       const filtered = data.filter(p => !p.isAdmin);
-      setPlayers(prev => JSON.stringify(prev) === JSON.stringify(filtered) ? prev : filtered);
+      setPlayers(filtered);
     });
 
     return () => {
-      unsubAuction?.();
-      unsubRecords?.();
-      unsubPlayers?.();
+      unsubRules();
+      unsubAuction();
+      unsubRecords();
+      unsubPlayers();
     };
   }, [user?.uid]);
 
-  // --- 5. TIMER LOGIC ---
+  // --- 4. COUNTDOWN TIMER ---
   useEffect(() => {
     if (!auction?.active || !auction?.endTime) {
       setTimeLeft("");
@@ -97,6 +101,17 @@ export default function PlayerDashboard() {
     return () => clearInterval(timer);
   }, [auction?.active, auction?.endTime]);
 
+  // --- 5. PROFIT CALCULATIONS ---
+  const totalProfit = useMemo(() => {
+    return records.reduce((total, rec) => {
+      if (rec.winnerName !== playerData?.name) {
+        const share = (rec.winningBid || 0) / (rec.playerCount || 1);
+        return total + share;
+      }
+      return total;
+    }, 0);
+  }, [records, playerData?.name]);
+
   // --- 6. BIDDING LOGIC ---
   const myNextBid = auction ? (auction.currentBid || 0) + selectedIncrement : 0;
   const isCurrentLeader = auction?.currentBidder === user?.uid;
@@ -106,10 +121,10 @@ export default function PlayerDashboard() {
     if (!canBid) {
         if(!playerData?.isPaid) toast.error("Payment pending verification.");
         return;
-    };
+    }
     
     setBidding(true);
-    if (navigator.vibrate) navigator.vibrate(50); 
+    if (navigator.vibrate) navigator.vibrate(60); 
 
     try {
       const snap = await getDoc(doc(db, 'auction', 'current')); 
@@ -118,7 +133,7 @@ export default function PlayerDashboard() {
         return; 
       }
       await placeBid(user.uid, playerData.name, myNextBid, false);
-      toast.success(`Bid placed: ₹${myNextBid.toLocaleString('en-IN')}`, { duration: 2000 });
+      toast.success(`Bid Placed: ₹${myNextBid.toLocaleString('en-IN')}`);
     } catch (err) {
       toast.error(err.message);
     } finally {
@@ -126,11 +141,27 @@ export default function PlayerDashboard() {
     }
   };
 
+  if (!playerData) return <div className="loading-screen"><div className="spinner"></div></div>;
+
   return (
     <div className="page-wide">
       <Toaster position="top-center" />
       
-      {/* NAVBAR */}
+      {/* UPDATE BAR */}
+      {updateAvailable && (
+        <div style={{
+          background: 'var(--gold)', color: 'black', padding: '12px', textAlign: 'center', 
+          fontWeight: 'bold', position: 'sticky', top: 0, zIndex: 1100,
+          display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '15px'
+        }}>
+          ✨ A new version is available! 
+          <button className="btn btn-sm" style={{background: 'black', color: 'white'}} onClick={() => window.location.reload()}>
+            REFRESH
+          </button>
+        </div>
+      )}
+
+      {/* NAVIGATION */}
       <nav className="navbar">
         <div className="navbar-brand">
           🪙 BC Circle
@@ -144,20 +175,21 @@ export default function PlayerDashboard() {
 
       {/* RULES MODAL */}
       {showRules && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
-          <div className="card" style={{ maxWidth: '400px', width: '100%', border: '1px solid var(--gold)' }}>
-            <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
-              <h3 className="card-title">Auction Rules</h3>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.9)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
+          <div className="card" style={{ maxWidth: '450px', width: '100%', border: '1px solid var(--gold)', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
+            <div className="card-header">
+              <h3 className="card-title">Circle Guidelines</h3>
               <button onClick={() => setShowRules(false)} style={{ background: 'none', border: 'none', color: 'var(--gold)', fontSize: '1.5rem', cursor: 'pointer' }}>✕</button>
             </div>
-            <div style={{ color: 'var(--text-muted)', lineHeight: '1.6', whiteSpace: 'pre-wrap', maxHeight: '60vh', overflowY: 'auto' }}>
-              {rules || "Rules will be posted by admin soon."}
+            <div style={{ flex: 1, overflowY: 'auto', color: 'var(--text)', lineHeight: '1.6', whiteSpace: 'pre-wrap', padding: '10px 0' }}>
+              {rules || "No rules defined yet. Please contact the administrator."}
             </div>
-            <button className="btn btn-primary btn-full" style={{ marginTop: '20px' }} onClick={() => setShowRules(false)}>Got it!</button>
+            <button className="btn btn-primary btn-full" style={{ marginTop: '20px' }} onClick={() => setShowRules(false)}>I Understand</button>
           </div>
         </div>
       )}
 
+      {/* TAB SYSTEM */}
       <div className="tabs">
         <div className={`tab ${tab === 'auction' ? 'active' : ''}`} onClick={() => setTab('auction')}>Live Auction</div>
         <div className={`tab ${tab === 'history' ? 'active' : ''}`} onClick={() => setTab('history')}>My Profits</div>
@@ -165,112 +197,147 @@ export default function PlayerDashboard() {
 
       {tab === 'auction' ? (
         <>
+          {/* WINNER BANNER */}
           {auction?.closed && auction?.result && showWinnerCard && (
-            <div className="winner-banner">
-              <button onClick={() => setShowWinnerCard(false)} className="btn-ghost" style={{ position: 'absolute', top: '10px', right: '15px', padding: '5px' }}>✕</button>
+            <div className="winner-banner" style={{ position: 'relative' }}>
+              <button onClick={() => setShowWinnerCard(false)} style={{ position: 'absolute', top: '10px', right: '15px', background: 'none', border: 'none', color: 'var(--gold)', cursor: 'pointer', fontSize: '1.2rem' }}>✕</button>
               <div className="winner-trophy">🎊</div>
               <h2 className="winner-name">{auction.result.winnerName} Won!</h2>
-              <div style={{ marginTop: '20px' }}>
-                <p style={{ opacity: 0.7 }}>Winning Bid: ₹{auction.result.winningBid?.toLocaleString('en-IN')}</p>
-                <div className="winner-amount">₹{auction.result.winnerReceives?.toLocaleString('en-IN')}</div>
+              <div style={{ marginTop: '15px' }}>
+                <p style={{ opacity: 0.7, fontSize: '0.9rem' }}>Final Winning Bid: ₹{auction.result.winningBid?.toLocaleString('en-IN')}</p>
+                <div className="winner-amount" style={{ fontSize: '2.8rem' }}>₹{auction.result.winnerReceives?.toLocaleString('en-IN')}</div>
               </div>
             </div>
           )}
 
+          {/* TIMER */}
           {auction?.active && (
-            <div className={`timer ${parseInt(timeLeft) < 1 ? 'urgent' : 'normal'}`} style={{ marginBottom: '15px' }}>
+            <div className={`timer ${parseInt(timeLeft) < 1 ? 'urgent' : 'normal'}`} style={{ marginBottom: '20px' }}>
               <span className="status-dot live"></span> ⏱ {timeLeft}
             </div>
           )}
 
+          {/* BIDDING CARD */}
           {auction?.active ? (
             <div className="card">
-              <div style={{ textAlign: 'center', marginBottom: '20px' }}>
-                <div className="bid-amount bid-amount-pulse">
+              <div style={{ textAlign: 'center', marginBottom: '25px' }}>
+                <div className="form-label">Current Bidding Price</div>
+                <div key={auction.currentBid} className="bid-amount bid-updated" style={{ fontSize: '4.5rem' }}>
                   <span className="currency">₹</span>{auction.currentBid?.toLocaleString('en-IN')}
                 </div>
-                <div className="badge badge-gold" style={{ marginTop: '10px', padding: '8px 16px' }}>
-                    {isCurrentLeader ? "🏅 You are Leading" : `Leader: ${auction.currentBidderName || "No Bids"}`}
+                <div className="badge badge-gold" style={{ marginTop: '15px', padding: '10px 20px' }}>
+                    {isCurrentLeader ? "🏅 You are the Leader" : `Current Leader: ${auction.currentBidderName || "No Bids"}`}
                 </div>
               </div>
 
-              <div style={{ background: 'rgba(0,0,0,0.2)', padding: '15px', borderRadius: 'var(--radius-sm)', marginBottom: '20px' }}>
-                <div className="form-label">Recent Activity</div>
-                <div>
-                  {auction.bids?.slice(-5).reverse().map((bid, i) => (
-                    <div key={i} className="bid-item">
-                      <span>{bid.playerName}</span>
-                      <span style={{ color: 'var(--gold)', fontWeight: 'bold' }}>₹{bid.amount.toLocaleString('en-IN')}</span>
-                    </div>
-                  ))}
+              {/* LOG */}
+              <div style={{ background: 'var(--bg-raised)', padding: '18px', borderRadius: 'var(--radius-sm)', marginBottom: '25px' }}>
+                <div className="form-label" style={{ fontSize: '0.7rem' }}>Live Bidding Log</div>
+                <div style={{ marginTop: '10px' }}>
+                  {auction.bids && auction.bids.length > 0 ? (
+                    auction.bids.slice(-3).reverse().map((bid, i) => (
+                      <div key={i} className="bid-item" style={{ opacity: i === 0 ? 1 : 0.5 }}>
+                        <span>{bid.playerName}</span>
+                        <span style={{ color: 'var(--gold)', fontWeight: 'bold' }}>₹{bid.amount.toLocaleString('en-IN')}</span>
+                      </div>
+                    ))
+                  ) : (
+                    <p style={{ textAlign: 'center', fontSize: '0.8rem', opacity: 0.5 }}>Waiting for the first bid...</p>
+                  )}
                 </div>
               </div>
 
+              {/* CONTROLS */}
               {!playerData?.hasWon ? (
                 <>
                   <div className="bid-options">
                     {BID_INCREMENTS.map(inc => (
-                      <div key={inc} className={`bid-option ${selectedIncrement === inc ? 'selected' : ''}`} onClick={() => setSelectedIncrement(inc)}>+₹{inc}</div>
+                      <div key={inc} className={`bid-option ${selectedIncrement === inc ? 'selected' : ''}`} onClick={() => setSelectedIncrement(inc)}>
+                        +₹{inc.toLocaleString('en-IN')}
+                      </div>
                     ))}
                   </div>
-                  <button className="btn btn-primary btn-full" disabled={!canBid || bidding} onClick={handleBid} style={{ padding: '18px', fontSize: '1.1rem' }}>
-                    {isCurrentLeader ? "Wait for others..." : `Bid ₹${myNextBid.toLocaleString('en-IN')}`}
+                  <button 
+                    className="btn btn-primary btn-full" 
+                    disabled={!canBid || bidding} 
+                    onClick={handleBid} 
+                    style={{ padding: '22px', fontSize: '1.3rem' }}
+                  >
+                    {isCurrentLeader ? "Leading... Wait" : `BID ₹${myNextBid.toLocaleString('en-IN')}`}
                   </button>
+                  {!playerData.isPaid && <p style={{ color: 'var(--accent)', fontSize: '0.75rem', textAlign: 'center', marginTop: '10px' }}>⚠️ Mark as Paid by Admin to enable bidding</p>}
                 </>
               ) : (
-                <div className="badge badge-gold" style={{ width: '100%', padding: '20px', justifyContent: 'center' }}>🏆 You have already won a round</div>
+                <div className="winner-banner" style={{ border: '1px solid var(--gold)', background: 'transparent' }}>
+                  <h3 style={{ color: 'var(--gold)' }}>🏆 Round Winner</h3>
+                  <p style={{ fontSize: '0.8rem', opacity: 0.7 }}>You have already won this month's round.</p>
+                </div>
               )}
             </div>
           ) : !auction?.closed && (
-            <div className="card" style={{ textAlign: 'center', padding: '60px 20px', border: '1px dashed var(--border)' }}>
-              <p style={{ color: 'var(--text-muted)' }}>Waiting for Admin to start...</p>
+            <div className="card" style={{ textAlign: 'center', padding: '80px 20px', border: '1px dashed var(--border)' }}>
+              <div className="spinner" style={{ marginBottom: '20px' }}></div>
+              <p style={{ color: 'var(--text-muted)' }}>The auction hasn't started yet.</p>
+              <p style={{ fontSize: '0.8rem', marginTop: '10px' }}>Admin will notify the circle shortly.</p>
             </div>
           )}
 
+          {/* LIST */}
           <div className="card">
-            <h3 className="card-title" style={{ marginBottom: '15px' }}>Participants ({players.length})</h3>
+            <h3 className="card-title" style={{ marginBottom: '15px' }}>Circle Members ({players.length})</h3>
             <div className="players-grid">
               {players.map(p => (
                 <div key={p.uid} className={`player-chip ${p.hasWon ? 'won' : ''}`}>
                   <div className="player-avatar">{p.name.charAt(0)}</div>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontSize: '0.85rem', fontWeight: 600 }}>{p.name} {p.uid === user.uid && "(Me)"}</div>
-                    <div className={p.isPaid ? 'badge-green' : 'badge-muted'} style={{ fontSize: '0.6rem' }}>
-                      {p.isPaid ? 'PAID' : 'UNPAID'}
+                    <div className={p.isPaid ? 'badge-green' : 'badge-muted'} style={{ fontSize: '0.6rem', background: 'none', border: 'none', padding: 0 }}>
+                      {p.isPaid ? '● PAID' : '○ UNPAID'}
                     </div>
                   </div>
-                  {p.hasWon && <span>🏆</span>}
+                  {p.hasWon && <span style={{ fontSize: '1.2rem' }}>🏆</span>}
                 </div>
               ))}
             </div>
           </div>
         </>
       ) : (
+        /* PROFITS */
         <>
-          <div className="card" style={{ background: 'var(--bg-raised)', textAlign: 'center', border: '1px solid var(--gold)' }}>
-            <div className="form-label" style={{ color: 'var(--gold)' }}>Total Accumulated Profit</div>
-            <div style={{ fontSize: '2.5rem', fontWeight: '900', color: 'var(--text)' }}>₹{Math.floor(totalProfit).toLocaleString('en-IN')}</div>
+          <div className="card" style={{ background: 'linear-gradient(135deg, var(--bg-raised), var(--bg-deep))', textAlign: 'center', border: '1px solid var(--gold)' }}>
+            <div className="form-label" style={{ color: 'var(--gold)' }}>My Total Savings & Profit</div>
+            <div style={{ fontSize: '3.5rem', fontWeight: '900', color: 'var(--text)', margin: '10px 0' }}>
+              ₹{Math.floor(totalProfit).toLocaleString('en-IN')}
+            </div>
+            <p style={{ fontSize: '0.75rem', opacity: 0.6 }}>Accumulated from rounds won by others</p>
           </div>
 
-          <div className="card" style={{ padding: '10px' }}>
+          <div className="card" style={{ padding: '0' }}>
+            <div style={{ padding: '20px' }}><h3 className="card-title">Profit History</h3></div>
             <table className="records-table">
               <thead>
                 <tr>
-                  <th>MONTH</th>
+                  <th>MONTH/ROUND</th>
                   <th>WINNER</th>
-                  <th style={{ textAlign: 'right' }}>PROFIT</th>
+                  <th style={{ textAlign: 'right' }}>MY SHARE</th>
                 </tr>
               </thead>
               <tbody>
-                {records.map((r, i) => (
-                  <tr key={i}>
-                    <td>{r.month}</td>
-                    <td style={{ fontWeight: 600 }}>{r.winnerName} {r.winnerName === playerData?.name && "🏆"}</td>
-                    <td style={{ textAlign: 'right', color: 'var(--green)', fontWeight: 'bold' }}>
-                        {r.winnerName === playerData?.name ? '—' : `+₹${Math.floor(r.winningBid / r.playerCount).toLocaleString('en-IN')}`}
-                    </td>
+                {records.length > 0 ? (
+                  records.map((r, i) => (
+                    <tr key={i}>
+                      <td>{r.month || `Round ${i + 1}`}</td>
+                      <td style={{ fontWeight: 600 }}>{r.winnerName} {r.winnerName === playerData?.name && "🏆"}</td>
+                      <td style={{ textAlign: 'right', color: 'var(--green)', fontWeight: 'bold' }}>
+                          {r.winnerName === playerData?.name ? <span style={{ color: 'var(--text-muted)' }}>Self Won</span> : `+₹${Math.floor(r.winningBid / r.playerCount).toLocaleString('en-IN')}`}
+                      </td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan="3" style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>No rounds completed yet.</td>
                   </tr>
-                ))}
+                )}
               </tbody>
             </table>
           </div>
