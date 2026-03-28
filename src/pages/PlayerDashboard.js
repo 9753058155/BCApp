@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef, useLayoutEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { placeBid, listenRecords, listenPlayers } from '../firebase/services';
 import { doc, onSnapshot, getDoc } from 'firebase/firestore';
@@ -9,6 +9,7 @@ const BID_INCREMENTS = [500, 1000, 2000];
 
 export default function PlayerDashboard() {
   const { user, playerData, logout } = useAuth();
+  const hasToasted = useRef(false); // Prevents repeat toasts
   
   // --- STATE ---
   const [players, setPlayers] = useState([]); 
@@ -29,22 +30,26 @@ export default function PlayerDashboard() {
       navigator.serviceWorker.ready.then((reg) => {
         reg.addEventListener('updatefound', () => {
           const newWorker = reg.installing;
-          newWorker.addEventListener('statechange', () => {
-            if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-              setUpdateAvailable(true);
-            }
-          });
+          if (newWorker) {
+            newWorker.addEventListener('statechange', () => {
+              if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                setUpdateAvailable(true);
+              }
+            });
+          }
         });
       });
     }
   }, []);
 
-  // --- 2. WELCOME TOAST ---
-  useEffect(() => {
-    if (playerData?.name) {
+  // --- 2. WELCOME TOAST (FIXED: Strict Single-Trigger) ---
+  useLayoutEffect(() => {
+    if (playerData?.name && !hasToasted.current) {
+      hasToasted.current = true; // Block immediately
       toast.success(`Welcome back, ${playerData.name}!`, {
-        id: 'welcome-toast',
-        duration: 3000
+        id: 'welcome-toast', 
+        duration: 3000,
+        position: 'top-center'
       });
     }
   }, [playerData?.name]); 
@@ -145,7 +150,7 @@ export default function PlayerDashboard() {
 
   return (
     <div className="page-wide">
-      <Toaster position="top-center" />
+      <Toaster position="top-center" reverseOrder={false} />
       
       {/* UPDATE BAR */}
       {updateAvailable && (
@@ -164,7 +169,7 @@ export default function PlayerDashboard() {
       {/* NAVIGATION */}
       <nav className="navbar">
         <div className="navbar-brand">
-          🪙 BC Circle
+          🪙 BC CIRCLE <small style={{fontSize: '0.6rem', opacity: 0.5}}>v1.3</small>
           <div className="navbar-sub">Hello, {playerData?.name}</div>
         </div>
         <div style={{ display: 'flex', gap: '8px' }}>

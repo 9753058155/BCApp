@@ -44,9 +44,9 @@ export default function Login() {
       {/* max-width is controlled by the card's container now */}
       <div className="card" style={{ width: '100%', maxWidth: '400px', padding: '40px 30px' }}>
         <span className="auth-logo">🪙</span>
-        <h1 style={{ color: 'var(--gold)', marginBottom: '8px', fontSize: '2rem' }}>BC Circle</h1>
+        <h1 style={{ color: 'var(--gold)', marginBottom: '8px', fontSize: '2rem' }}>BC CIRCLE</h1>
         <p style={{ color: 'var(--text-muted)', marginBottom: '32px', fontSize: '0.9rem', letterSpacing: '0.05em' }}>
-          FAMILY AUCTION PORTAL
+          AUCTION PORTAL
         </p>
         
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
