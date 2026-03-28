@@ -1,9 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { listenAuction, placeBid, listenRecords, listenPlayers } from '../firebase/services';
+import { placeBid, listenRecords, listenPlayers } from '../firebase/services';
 import { doc, onSnapshot, getDoc } from 'firebase/firestore';
 import { db } from '../firebase/config';
-import toast from 'react-hot-toast';
+import toast, { Toaster } from 'react-hot-toast';
 
 const BID_INCREMENTS = [500, 1000, 2000];
 
@@ -12,89 +12,113 @@ export default function PlayerDashboard() {
   const [players, setPlayers] = useState([]); 
   const [auction, setAuction] = useState(null);
   const [records, setRecords] = useState([]);
+  const [rules, setRules] = useState(""); // Rules state
+  const [showRules, setShowRules] = useState(false); // Modal state
   const [selectedIncrement, setSelectedIncrement] = useState(500);
   const [bidding, setBidding] = useState(false);
   const [tab, setTab] = useState('auction');
   const [timeLeft, setTimeLeft] = useState("");
   const [showWinnerCard, setShowWinnerCard] = useState(true);
 
-  // --- PROFIT CALCULATION LOGIC ---
-  const calculateTotalProfit = () => {
+  // --- 1. WELCOME MESSAGE FIX (RUNS ONLY ONCE) ---
+  useEffect(() => {
+    if (playerData?.name) {
+      toast.success(`Welcome back, ${playerData.name}!`, {
+        id: 'welcome-toast', // Prevents duplicates and persistence
+        duration: 3000
+      });
+    }
+  }, []); 
+
+  // --- 2. RULES LISTENER (Read-Only) ---
+  useEffect(() => {
+    const unsubRules = onSnapshot(doc(db, 'rules', 'current'), (snap) => {
+      if (snap.exists()) setRules(snap.data().content);
+    });
+    return () => unsubRules();
+  }, []);
+
+  // --- 3. OPTIMIZED PROFIT LOGIC ---
+  const totalProfit = useMemo(() => {
     return records.reduce((total, rec) => {
-      // If I am NOT the winner of that specific month, I get a share of that winning bid
       if (rec.winnerName !== playerData?.name) {
         const share = (rec.winningBid || 0) / (rec.playerCount || 1);
         return total + share;
       }
       return total;
     }, 0);
-  };
+  }, [records, playerData?.name]);
 
+  // --- 4. LISTENERS ---
   useEffect(() => {
-    const unsubAuction = onSnapshot(doc(db, 'auction', 'current'), (snap) => {
+    if (!user?.uid) return;
+    let unsubAuction, unsubRecords, unsubPlayers;
+
+    unsubAuction = onSnapshot(doc(db, 'auction', 'current'), (snap) => {
       if (snap.exists()) {
         const data = snap.data();
-        setAuction(data);
+        setAuction(prev => JSON.stringify(prev) === JSON.stringify(data) ? prev : data);
         if (data.active) setShowWinnerCard(true);
         if (data.closed) setBidding(false);
       }
     });
 
-    const unsubRecords = listenRecords(setRecords);
-    const unsubPlayers = listenPlayers((data) => {
-      setPlayers(data.filter(p => !p.isAdmin));
+    unsubRecords = listenRecords(setRecords);
+    unsubPlayers = listenPlayers((data) => {
+      const filtered = data.filter(p => !p.isAdmin);
+      setPlayers(prev => JSON.stringify(prev) === JSON.stringify(filtered) ? prev : filtered);
     });
 
     return () => {
-      unsubAuction();
-      unsubRecords();
-      unsubPlayers();
+      unsubAuction?.();
+      unsubRecords?.();
+      unsubPlayers?.();
     };
-  }, [playerData?.name]);
+  }, [user?.uid]);
 
+  // --- 5. TIMER LOGIC ---
   useEffect(() => {
+    if (!auction?.active || !auction?.endTime) {
+      setTimeLeft("");
+      return;
+    }
     const timer = setInterval(() => {
-      if (auction?.active && auction?.endTime) {
-        const diff = auction.endTime - Date.now();
-        if (diff <= 0) {
-          setTimeLeft("00:00");
-        } else {
-          const mins = Math.floor(diff / 60000);
-          const secs = Math.floor((diff % 60000) / 1000);
-          setTimeLeft(`${mins}:${secs < 10 ? '0' : ''}${secs}`);
-        }
+      const diff = auction.endTime - Date.now();
+      if (diff <= 0) {
+        setTimeLeft("00:00");
+        clearInterval(timer);
+      } else {
+        const mins = Math.floor(diff / 60000);
+        const secs = Math.floor((diff % 60000) / 1000);
+        const newTime = `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+        setTimeLeft(prev => prev !== newTime ? newTime : prev);
       }
     }, 1000);
     return () => clearInterval(timer);
-  }, [auction]);
+  }, [auction?.active, auction?.endTime]);
 
+  // --- 6. BIDDING LOGIC ---
   const myNextBid = auction ? (auction.currentBid || 0) + selectedIncrement : 0;
   const isCurrentLeader = auction?.currentBidder === user?.uid;
-
-  const canBid = 
-    auction?.active && 
-    !auction?.closed && 
-    !playerData?.hasWon && 
-    playerData?.isPaid && 
-    !isCurrentLeader;
+  const canBid = auction?.active && !auction?.closed && !playerData?.hasWon && playerData?.isPaid && !isCurrentLeader;
 
   const handleBid = async () => {
-    if (!canBid) return;
+    if (!canBid) {
+        if(!playerData?.isPaid) toast.error("Payment pending verification.");
+        return;
+    };
     
     setBidding(true);
-    try {
-      const auctionRef = doc(db, 'auction', 'current');
-      const snap = await getDoc(auctionRef); 
-      const latestAuction = snap.data();
+    if (navigator.vibrate) navigator.vibrate(50); 
 
-      if (!latestAuction.active || latestAuction.closed) {
+    try {
+      const snap = await getDoc(doc(db, 'auction', 'current')); 
+      if (!snap.data().active || snap.data().closed) {
         toast.error("Auction has already ended!");
-        setBidding(false);
         return; 
       }
-
       await placeBid(user.uid, playerData.name, myNextBid, false);
-      toast.success(`Bid placed: ₹${myNextBid.toLocaleString('en-IN')}`);
+      toast.success(`Bid placed: ₹${myNextBid.toLocaleString('en-IN')}`, { duration: 2000 });
     } catch (err) {
       toast.error(err.message);
     } finally {
@@ -103,101 +127,79 @@ export default function PlayerDashboard() {
   };
 
   return (
-    <div className="page-wide" style={{ maxWidth: '600px', margin: '0 auto', padding: '15px' }}>
-      <nav className="navbar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-        <div>
-          <div className="navbar-brand" style={{ fontWeight: 'bold', fontSize: '1.2rem' }}>🪙 BC Circle</div>
-          <div style={{ fontSize: '0.8rem', opacity: 0.8 }}>Hello, {playerData?.name}</div>
+    <div className="page-wide">
+      <Toaster position="top-center" />
+      
+      {/* NAVBAR */}
+      <nav className="navbar">
+        <div className="navbar-brand">
+          🪙 BC Circle
+          <div className="navbar-sub">Hello, {playerData?.name}</div>
         </div>
-        <button className="btn btn-ghost btn-sm" onClick={logout}>Logout</button>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button className="btn btn-ghost btn-sm" onClick={() => setShowRules(true)}>📜 Rules</button>
+          <button className="btn btn-ghost btn-sm" onClick={logout}>Logout</button>
+        </div>
       </nav>
 
-      <div className="tabs" style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
-        <button className={`btn ${tab === 'auction' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setTab('auction')} style={{ flex: 1 }}>Live Auction</button>
-        <button className={`btn ${tab === 'history' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setTab('history')} style={{ flex: 1 }}>My Profits</button>
+      {/* RULES MODAL */}
+      {showRules && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
+          <div className="card" style={{ maxWidth: '400px', width: '100%', border: '1px solid var(--gold)' }}>
+            <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+              <h3 className="card-title">Auction Rules</h3>
+              <button onClick={() => setShowRules(false)} style={{ background: 'none', border: 'none', color: 'var(--gold)', fontSize: '1.5rem', cursor: 'pointer' }}>✕</button>
+            </div>
+            <div style={{ color: 'var(--text-muted)', lineHeight: '1.6', whiteSpace: 'pre-wrap', maxHeight: '60vh', overflowY: 'auto' }}>
+              {rules || "Rules will be posted by admin soon."}
+            </div>
+            <button className="btn btn-primary btn-full" style={{ marginTop: '20px' }} onClick={() => setShowRules(false)}>Got it!</button>
+          </div>
+        </div>
+      )}
+
+      <div className="tabs">
+        <div className={`tab ${tab === 'auction' ? 'active' : ''}`} onClick={() => setTab('auction')}>Live Auction</div>
+        <div className={`tab ${tab === 'history' ? 'active' : ''}`} onClick={() => setTab('history')}>My Profits</div>
       </div>
 
       {tab === 'auction' ? (
         <>
-          {/* --- WINNER RESULT CARD --- */}
           {auction?.closed && auction?.result && showWinnerCard && (
-            <div className="card" style={{ textAlign: 'center', border: '2px solid var(--gold)', background: 'rgba(212, 175, 55, 0.05)', padding: '30px 20px', marginBottom: '20px', position: 'relative' }}>
-              <button onClick={() => setShowWinnerCard(false)} style={{ position: 'absolute', top: '10px', right: '15px', background: 'none', border: 'none', color: '#666', fontSize: '1.2rem', cursor: 'pointer' }}>✕</button>
-              
-              <div style={{ fontSize: '3.5rem' }}>🎊</div>
-              <h2 style={{ color: 'var(--gold)', margin: '10px 0' }}>{auction.result.winnerName} Won!</h2>
-              
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '20px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px', background: 'rgba(255,255,255,0.05)', borderRadius: '8px', border: '1px solid #333' }}>
-                  <span style={{ opacity: 0.7, fontSize: '0.9rem' }}>Winning Bid:</span>
-                  <span style={{ fontWeight: 'bold', color: 'var(--gold)' }}>₹{auction.result.winningBid?.toLocaleString('en-IN')}</span>
-                </div>
-
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '15px', background: 'rgba(74, 222, 128, 0.1)', borderRadius: '8px', border: '1px solid #4ade80' }}>
-                  <div style={{ textAlign: 'left' }}>
-                    <div style={{ color: '#4ade80', fontWeight: 'bold' }}>Final Payout</div>
-                    <div style={{ fontSize: '0.65rem', opacity: 0.8 }}>Winner receives</div>
-                  </div>
-                  <span style={{ color: '#4ade80', fontSize: '1.6rem', fontWeight: '800' }}>₹{auction.result.winnerReceives?.toLocaleString('en-IN')}</span>
-                </div>
-
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '15px', background: 'rgba(56, 189, 248, 0.1)', borderRadius: '8px', border: '1px solid #0ea5e9' }}>
-                  <div style={{ textAlign: 'left' }}>
-                    <div style={{ color: '#0ea5e9', fontWeight: 'bold' }}>Your Share</div>
-                    <div style={{ fontSize: '0.65rem', opacity: 0.8 }}>Profit from winning bid</div>
-                  </div>
-                  <span style={{ color: '#0ea5e9', fontSize: '1.6rem', fontWeight: '800' }}>+₹{auction.result.profitPerPlayer?.toLocaleString('en-IN')}</span>
-                </div>
+            <div className="winner-banner">
+              <button onClick={() => setShowWinnerCard(false)} className="btn-ghost" style={{ position: 'absolute', top: '10px', right: '15px', padding: '5px' }}>✕</button>
+              <div className="winner-trophy">🎊</div>
+              <h2 className="winner-name">{auction.result.winnerName} Won!</h2>
+              <div style={{ marginTop: '20px' }}>
+                <p style={{ opacity: 0.7 }}>Winning Bid: ₹{auction.result.winningBid?.toLocaleString('en-IN')}</p>
+                <div className="winner-amount">₹{auction.result.winnerReceives?.toLocaleString('en-IN')}</div>
               </div>
             </div>
           )}
 
-          {/* --- LIVE TIMER --- */}
           {auction?.active && (
-            <div style={{ textAlign: 'center', background: '#1a1a1a', padding: '10px', borderRadius: '10px', marginBottom: '15px', border: '1px solid #333' }}>
-              <span style={{ color: '#ff4d4d', fontWeight: '800', fontSize: '1.1rem' }}>⏱ TIME LEFT: {timeLeft}</span>
+            <div className={`timer ${parseInt(timeLeft) < 1 ? 'urgent' : 'normal'}`} style={{ marginBottom: '15px' }}>
+              <span className="status-dot live"></span> ⏱ {timeLeft}
             </div>
           )}
 
-          {/* --- LIVE STATS BAR --- */}
-          {auction?.active && (
-            <div style={{ display: 'flex', gap: '10px', marginBottom: '15px' }}>
-              <div className="card" style={{ flex: 1, padding: '10px', textAlign: 'center' }}>
-                <div style={{ fontSize: '0.65rem', opacity: 0.6 }}>TOTAL POOL</div>
-                <div style={{ fontWeight: 'bold', color: 'var(--gold)' }}>₹{auction.totalPool?.toLocaleString('en-IN')}</div>
-              </div>
-              <div className="card" style={{ flex: 1, padding: '10px', textAlign: 'center' }}>
-                <div style={{ fontSize: '0.65rem', opacity: 0.6 }}>MEMBERS</div>
-                <div style={{ fontWeight: 'bold' }}>{auction.totalPlayers}</div>
-              </div>
-            </div>
-          )}
-
-          {/* --- MAIN BIDDING SCREEN --- */}
           {auction?.active ? (
-            <div className="card" style={{ padding: '20px' }}>
+            <div className="card">
               <div style={{ textAlign: 'center', marginBottom: '20px' }}>
-                <span className="badge badge-green">LIVE</span>
-                <h1 style={{ fontSize: '4rem', color: 'var(--gold)', margin: '10px 0', fontWeight: '800' }}>₹{auction.currentBid?.toLocaleString('en-IN')}</h1>
-                {auction.currentBidderName && (
-                  <div style={{ padding: '12px', background: isCurrentLeader ? 'rgba(74, 222, 128, 0.1)' : 'rgba(255,255,255,0.05)', borderRadius: '8px', color: isCurrentLeader ? '#4ade80' : 'white' }}>
-                    {isCurrentLeader ? "🏅 You are leading!" : `Leader: ${auction.currentBidderName}`}
-                  </div>
-                )}
+                <div className="bid-amount bid-amount-pulse">
+                  <span className="currency">₹</span>{auction.currentBid?.toLocaleString('en-IN')}
+                </div>
+                <div className="badge badge-gold" style={{ marginTop: '10px', padding: '8px 16px' }}>
+                    {isCurrentLeader ? "🏅 You are Leading" : `Leader: ${auction.currentBidderName || "No Bids"}`}
+                </div>
               </div>
 
-              {!playerData?.isPaid && (
-                <div style={{ background: 'rgba(255, 77, 77, 0.1)', border: '1px solid #ff4d4d', color: '#ff4d4d', padding: '10px', borderRadius: '8px', textAlign: 'center', marginBottom: '15px', fontSize: '0.85rem' }}>
-                   ⚠️ You must pay the Admin to enable bidding.
-                </div>
-              )}
-
-              <div style={{ background: 'rgba(0,0,0,0.2)', padding: '15px', borderRadius: '12px', marginBottom: '20px' }}>
-                <div style={{ fontSize: '0.7rem', opacity: 0.5, marginBottom: '10px' }}>ACTIVITY FEED</div>
-                <div style={{ maxHeight: '100px', overflowY: 'auto' }}>
-                  {auction.bids?.slice().reverse().map((bid, i) => (
-                    <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid #222' }}>
-                      <span style={{ fontSize: '0.85rem' }}>{bid.playerName}</span>
+              <div style={{ background: 'rgba(0,0,0,0.2)', padding: '15px', borderRadius: 'var(--radius-sm)', marginBottom: '20px' }}>
+                <div className="form-label">Recent Activity</div>
+                <div>
+                  {auction.bids?.slice(-5).reverse().map((bid, i) => (
+                    <div key={i} className="bid-item">
+                      <span>{bid.playerName}</span>
                       <span style={{ color: 'var(--gold)', fontWeight: 'bold' }}>₹{bid.amount.toLocaleString('en-IN')}</span>
                     </div>
                   ))}
@@ -205,97 +207,70 @@ export default function PlayerDashboard() {
               </div>
 
               {!playerData?.hasWon ? (
-                <div className="bidding-section">
-                  <div style={{ display: 'flex', gap: '8px', marginBottom: '15px' }}>
+                <>
+                  <div className="bid-options">
                     {BID_INCREMENTS.map(inc => (
-                      <button key={inc} className={`btn ${selectedIncrement === inc ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setSelectedIncrement(inc)} style={{ flex: 1 }}>+₹{inc}</button>
+                      <div key={inc} className={`bid-option ${selectedIncrement === inc ? 'selected' : ''}`} onClick={() => setSelectedIncrement(inc)}>+₹{inc}</div>
                     ))}
                   </div>
-                  <button className="btn btn-primary btn-full" disabled={!canBid || bidding} onClick={handleBid} style={{ padding: '18px', fontSize: '1.2rem', fontWeight: 'bold' }}>
-                    {!playerData?.isPaid ? "Payment Pending" : (isCurrentLeader ? "Leading..." : `Bid ₹${myNextBid.toLocaleString('en-IN')}`)}
+                  <button className="btn btn-primary btn-full" disabled={!canBid || bidding} onClick={handleBid} style={{ padding: '18px', fontSize: '1.1rem' }}>
+                    {isCurrentLeader ? "Wait for others..." : `Bid ₹${myNextBid.toLocaleString('en-IN')}`}
                   </button>
-                </div>
+                </>
               ) : (
-                <div className="badge badge-gold" style={{ width: '100%', padding: '20px', textAlign: 'center' }}>🏆 Round Completed</div>
+                <div className="badge badge-gold" style={{ width: '100%', padding: '20px', justifyContent: 'center' }}>🏆 You have already won a round</div>
               )}
             </div>
           ) : !auction?.closed && (
-            <div className="card" style={{ textAlign: 'center', padding: '60px 20px', border: '1px dashed #444' }}>
-              <div style={{ fontSize: '3rem', marginBottom: '10px' }}>⏳</div>
-              <p style={{ opacity: 0.6 }}>Round hasn't started yet.</p>
+            <div className="card" style={{ textAlign: 'center', padding: '60px 20px', border: '1px dashed var(--border)' }}>
+              <p style={{ color: 'var(--text-muted)' }}>Waiting for Admin to start...</p>
             </div>
           )}
 
-          {/* --- FAMILY LIST --- */}
-          <div className="card" style={{ marginTop: '20px' }}>
-            <h3 style={{ fontSize: '1rem', marginBottom: '15px' }}>Participants ({players.length})</h3>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          <div className="card">
+            <h3 className="card-title" style={{ marginBottom: '15px' }}>Participants ({players.length})</h3>
+            <div className="players-grid">
               {players.map(p => (
-                <div key={p.uid} style={{ 
-                  display: 'flex', justifyContent: 'space-between', padding: '10px 15px', background: 'rgba(255,255,255,0.03)', borderRadius: '8px',
-                  border: p.uid === user.uid ? '1px solid var(--gold)' : '1px solid transparent'
-                }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <span style={{ fontSize: '0.9rem' }}>{p.name} {p.uid === user.uid && "(You)"}</span>
-                    {p.hasWon && <span style={{ fontSize: '0.7rem' }}>🏆</span>}
+                <div key={p.uid} className={`player-chip ${p.hasWon ? 'won' : ''}`}>
+                  <div className="player-avatar">{p.name.charAt(0)}</div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: '0.85rem', fontWeight: 600 }}>{p.name} {p.uid === user.uid && "(Me)"}</div>
+                    <div className={p.isPaid ? 'badge-green' : 'badge-muted'} style={{ fontSize: '0.6rem' }}>
+                      {p.isPaid ? 'PAID' : 'UNPAID'}
+                    </div>
                   </div>
-                  {p.isPaid ? 
-                    <span style={{ color: '#4ade80', fontSize: '0.8rem', fontWeight: 'bold' }}>✓ Paid</span> : 
-                    <span style={{ opacity: 0.4, fontSize: '0.8rem' }}>Pending</span>
-                  }
+                  {p.hasWon && <span>🏆</span>}
                 </div>
               ))}
             </div>
           </div>
         </>
       ) : (
-        /* --- HISTORY TAB WITH PROFIT OVERVIEW --- */
         <>
-          <div className="card" style={{ 
-            background: 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)', 
-            border: '1px solid #38bdf8',
-            padding: '25px',
-            textAlign: 'center',
-            marginBottom: '20px'
-          }}>
-            <div style={{ color: '#38bdf8', fontSize: '0.75rem', fontWeight: 'bold', letterSpacing: '1px' }}>TOTAL ACCUMULATED PROFIT</div>
-            <div style={{ fontSize: '2.5rem', fontWeight: '900', color: 'white', margin: '10px 0' }}>
-              ₹{Math.floor(calculateTotalProfit()).toLocaleString('en-IN')}
-            </div>
-            <p style={{ opacity: 0.6, fontSize: '0.7rem' }}>Extra money you've earned from others' bids across all rounds.</p>
+          <div className="card" style={{ background: 'var(--bg-raised)', textAlign: 'center', border: '1px solid var(--gold)' }}>
+            <div className="form-label" style={{ color: 'var(--gold)' }}>Total Accumulated Profit</div>
+            <div style={{ fontSize: '2.5rem', fontWeight: '900', color: 'var(--text)' }}>₹{Math.floor(totalProfit).toLocaleString('en-IN')}</div>
           </div>
 
-          <div className="card" style={{ overflowX: 'auto' }}>
-            <h3 style={{ fontSize: '1rem', marginBottom: '15px' }}>Monthly History</h3>
-            <table className="records-table" style={{ width: '100%', minWidth: '450px' }}>
+          <div className="card" style={{ padding: '10px' }}>
+            <table className="records-table">
               <thead>
-                <tr style={{ textAlign: 'left', opacity: 0.5, fontSize: '0.75rem' }}>
+                <tr>
                   <th>MONTH</th>
                   <th>WINNER</th>
-                  <th style={{ textAlign: 'right' }}>WINNER GOT</th>
-                  <th style={{ textAlign: 'right' }}>YOUR PROFIT</th>
+                  <th style={{ textAlign: 'right' }}>PROFIT</th>
                 </tr>
               </thead>
               <tbody>
-                {records.map((r, i) => {
-                  const isMe = r.winnerName === playerData?.name;
-                  const myProfitShare = Math.floor((r.winningBid || 0) / (r.playerCount || 1));
-                  
-                  return (
-                    <tr key={i} style={{ borderBottom: '1px solid #222' }}>
-                      <td style={{ padding: '15px 0', fontSize: '0.85rem' }}>{r.month}</td>
-                      <td style={{ fontSize: '0.85rem', fontWeight: isMe ? 'bold' : 'normal' }}>
-                        {r.winnerName} {isMe && "(You)"}
-                      </td>
-                      <td style={{ textAlign: 'right', color: 'var(--gold)', fontWeight: '600', fontSize: '0.85rem' }}>
-                        ₹{r.winnerReceives?.toLocaleString('en-IN')}
-                      </td>
-                      <td style={{ textAlign: 'right', color: isMe ? '#666' : '#4ade80', fontWeight: 'bold', fontSize: '0.85rem' }}>
-                        {isMe ? '—' : `+₹${myProfitShare.toLocaleString('en-IN')}`}
-                      </td>
-                    </tr>
-                  );
-                })}
+                {records.map((r, i) => (
+                  <tr key={i}>
+                    <td>{r.month}</td>
+                    <td style={{ fontWeight: 600 }}>{r.winnerName} {r.winnerName === playerData?.name && "🏆"}</td>
+                    <td style={{ textAlign: 'right', color: 'var(--green)', fontWeight: 'bold' }}>
+                        {r.winnerName === playerData?.name ? '—' : `+₹${Math.floor(r.winningBid / r.playerCount).toLocaleString('en-IN')}`}
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>

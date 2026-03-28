@@ -14,6 +14,7 @@
   --border: rgba(201, 168, 76, 0.25);
   --radius: 16px;
   --radius-sm: 10px;
+  --input-height: 54px;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -101,8 +102,19 @@ h1, h2, h3 { font-family: 'Playfair Display', serif; }
 .btn-sm { padding: 8px 16px; font-size: 0.85rem; }
 
 /* ── Form ── */
-.form-group { margin-bottom: 16px; }
-.form-label { display: block; font-size: 0.8rem; color: var(--text-muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 500; }
+.form-group {
+  margin-bottom: 20px;
+  width: 100%;
+}
+.form-label { 
+  display: block; 
+  font-size: 0.85rem; 
+  color: var(--text-muted); 
+  margin-bottom: 8px; 
+  text-transform: uppercase; 
+  letter-spacing: 0.06em; 
+  font-weight: 500; 
+}
 .form-input {
   width: 100%;
   padding: 12px 16px;
@@ -315,3 +327,63 @@ h1, h2, h3 { font-family: 'Playfair Display', serif; }
   color: #4ade80; 
   font-weight: bold;
 } 
+
+/* Prevents the 300ms click delay on mobile devices */
+button, .btn {
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Make the bid amount look "Live" with a small pulse when it changes */
+.bid-amount-pulse {
+  transition: transform 0.1s ease-in-out;
+}
+.bid-amount-pulse:active {
+  transform: scale(1.1);
+}
+
+/* ── Auth Page Layout ── */
+.auth-container {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+/* Update the form-input to use the variable height for consistency */
+.form-input {
+  width: 100%;
+  height: var(--input-height); /* This makes them significantly larger */
+  padding: 0 16px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-family: 'DM Sans', sans-serif;
+  font-size: 1rem;
+  transition: all 0.2s ease;
+}
+
+.form-input:focus {
+  outline: none;
+  border-color: var(--gold);
+  background: rgba(255, 255, 255, 0.05);
+  box-shadow: 0 0 0 4px rgba(201, 168, 76, 0.1);
+}
+
+/* Premium Title for Login */
+.auth-logo {
+  font-size: 3.5rem;
+  margin-bottom: 10px;
+  display: block;
+}
+
+/* Add this to App.css if you haven't already */
+.bid-amount-pulse {
+  transition: transform 0.1s ease-in-out;
+}
+.bid-amount-pulse:active {
+  transform: scale(1.05);
+}

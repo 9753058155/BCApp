@@ -1,11 +1,47 @@
 import { 
   doc, getDoc, setDoc, updateDoc, onSnapshot, collection, getDocs, query, where, orderBy, deleteDoc, writeBatch 
 } from 'firebase/firestore';
-import { signInWithEmailAndPassword, signOut, createUserWithEmailAndPassword } from 'firebase/auth';
+import { 
+  signInWithEmailAndPassword, 
+  signOut, 
+  createUserWithEmailAndPassword, 
+  setPersistence, 
+  browserLocalPersistence 
+} from 'firebase/auth';
 import { secondaryAuth, db, auth } from './config';
+import toast from 'react-hot-toast';
 
 // ─── AUTH ───────────────────────────────────────────────────────────────────
-export const loginPlayer = (email, password) => signInWithEmailAndPassword(auth, email, password);
+/**
+ * PERMANENT FIX: 
+ * 1. Sets local persistence so the user stays logged in on refresh.
+ * 2. Trims email to prevent invisible space errors.
+ * 3. Logs specific error codes to console for debugging.
+ */
+export const loginPlayer = async (email, password) => {
+  try {
+    await setPersistence(auth, browserLocalPersistence);
+    const userCredential = await signInWithEmailAndPassword(auth, email.trim(), password);
+    return userCredential.user;
+  } catch (error) {
+    console.error("Firebase Auth Error Code:", error.code);
+    
+    // Map common errors to friendly toast messages
+    if (error.code === 'auth/invalid-credential' || error.code === 'auth/wrong-password') {
+      toast.error("Invalid email or password.");
+    } else if (error.code === 'auth/user-not-found') {
+      toast.error("No account found with this email.");
+    } else if (error.code === 'auth/network-request-failed') {
+      toast.error("Network error. Check your internet.");
+    } else if (error.code === 'auth/too-many-requests') {
+      toast.error("Too many failed attempts. Try later.");
+    } else {
+      toast.error(`Login failed: ${error.code}`);
+    }
+    throw error;
+  }
+};
+
 export const logoutPlayer = () => signOut(auth);
 
 // ─── PLAYERS ────────────────────────────────────────────────────────────────
@@ -26,17 +62,18 @@ export const addPlayer = async (email, password, name) => {
   const querySnapshot = await getDocs(q);
   if (!querySnapshot.empty) throw new Error("A player with this email already exists!");
 
-  const userCredential = await createUserWithEmailAndPassword(secondaryAuth, email, password);
+  // Use secondaryAuth to create user without logging out the current admin
+  const userCredential = await createUserWithEmailAndPassword(secondaryAuth, email.trim(), password);
   const uid = userCredential.user.uid;
   await signOut(secondaryAuth);
 
   await setDoc(doc(db, "players", uid), {
     uid, 
     name, 
-    email, 
+    email: email.trim(), 
     isAdmin: false, 
     hasWon: false, 
-    isPaid: false, // Initialize as unpaid
+    isPaid: false, 
     wonMonth: null, 
     createdAt: new Date().toISOString()
   });
@@ -119,7 +156,6 @@ export const closeAuction = async (auctionData) => {
   let winnerName = auctionData.currentBidderName;
   let winningBid = auctionData.currentBid;
 
-  // RANDOM SELECTION: If no one bid, pick a random ELIGIBLE player (Paid + Not Won)
   if (!winnerId) {
     const playersSnap = await getDocs(collection(db, 'players'));
     const eligible = playersSnap.docs
@@ -132,7 +168,6 @@ export const closeAuction = async (auctionData) => {
       winnerName = random.name;
       winningBid = auctionData.minBid; 
     } else {
-      // If no one is eligible (no one paid), stop auction without a winner
       await updateDoc(doc(db, 'auction', 'current'), { active: false, closed: false });
       return;
     }
@@ -148,22 +183,16 @@ export const closeAuction = async (auctionData) => {
     closedAt: new Date().toISOString()
   };
 
-  // --- BATCH UPDATE FOR SPEED AND PAYMENT RESET ---
   const batch = writeBatch(db);
-
-  // 1. Save Winner Record
   const recordRef = doc(db, 'records', `${auctionData.month}-${Date.now()}`);
   batch.set(recordRef, result);
   
-  // 2. Update Auction Status
   const auctionRef = doc(db, 'auction', 'current');
   batch.update(auctionRef, { active: false, closed: true, result });
   
-  // 3. Mark the Winner
   const winnerRef = doc(db, 'players', winnerId);
   batch.update(winnerRef, { hasWon: true, wonMonth: auctionData.month });
 
-  // 4. RESET ALL PAYMENTS (Checkboxes) FOR EVERYONE
   const allPlayers = await getDocs(collection(db, 'players'));
   allPlayers.docs.forEach(p => {
     batch.update(doc(db, 'players', p.id), { isPaid: false });

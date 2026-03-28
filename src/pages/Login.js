@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import toast, { Toaster } from 'react-hot-toast';
 
 export default function Login() {
@@ -12,8 +12,6 @@ export default function Login() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
-    // Clean the input to prevent "invalid-email" errors from trailing spaces
     const cleanEmail = email.trim();
 
     if (!cleanEmail || !password) {
@@ -22,19 +20,17 @@ export default function Login() {
 
     try {
       setLoading(true);
-      await login(cleanEmail, password);
-      toast.success("Welcome to BC Circle!");
+      await login(cleanEmail, password); 
+      toast.success("Welcome back!", { duration: 3000 });
       navigate('/');
     } catch (err) {
-      // Mapping Firebase technical errors to friendly messages
-      if (err.code === 'auth/invalid-email') {
-        toast.error("That email doesn't look right. Check for typos!");
-      } else if (err.code === 'auth/user-not-found') {
-        toast.error("Account not found. Contact Admin.");
-      } else if (err.code === 'auth/wrong-password') {
-        toast.error("Incorrect password. Try again.");
+      // Friendly error handling
+      if (err.code === 'auth/invalid-credential') {
+        toast.error("Invalid email or password.");
+      } else if (err.code === 'auth/too-many-requests') {
+        toast.error("Too many attempts. Please wait.");
       } else {
-        toast.error("Login failed. Please check your details.");
+        toast.error("Login failed. Check your connection.");
       }
     } finally {
       setLoading(false);
@@ -42,31 +38,55 @@ export default function Login() {
   };
 
   return (
-    <div className="auth-container" style={{ maxWidth: '400px', margin: '100px auto', padding: '20px' }}>
+    <div className="auth-container">
       <Toaster position="top-center" />
-      <div className="card" style={{ padding: '30px', textAlign: 'center' }}>
-        <h1 style={{ color: 'var(--gold)', marginBottom: '10px' }}>🪙 BC Circle</h1>
-        <p style={{ opacity: 0.6, marginBottom: '30px' }}>Sign in to start bidding</p>
+      
+      {/* max-width is controlled by the card's container now */}
+      <div className="card" style={{ width: '100%', maxWidth: '400px', padding: '40px 30px' }}>
+        <span className="auth-logo">🪙</span>
+        <h1 style={{ color: 'var(--gold)', marginBottom: '8px', fontSize: '2rem' }}>BC Circle</h1>
+        <p style={{ color: 'var(--text-muted)', marginBottom: '32px', fontSize: '0.9rem', letterSpacing: '0.05em' }}>
+          FAMILY AUCTION PORTAL
+        </p>
         
-        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
-          <input 
-            className="input"
-            type="email" 
-            placeholder="Email Address" 
-            value={email} 
-            onChange={(e) => setEmail(e.target.value)} 
-          />
-          <input 
-            className="input" 
-            type="password" 
-            placeholder="Password" 
-            value={password} 
-            onChange={(e) => setPassword(e.target.value)} 
-          />
-          <button className="btn btn-primary btn-full" disabled={loading} type="submit" style={{ padding: '12px' }}>
-            {loading ? "Signing in..." : "Login"}
+        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+          <div style={{ textAlign: 'left' }}>
+            <label className="form-label">Email Address</label>
+            <input 
+              className="form-input" 
+              type="email" 
+              placeholder="Enter your email" 
+              value={email} 
+              onChange={(e) => setEmail(e.target.value)} 
+              required
+            />
+          </div>
+
+          <div style={{ textAlign: 'left' }}>
+            <label className="form-label">Password</label>
+            <input 
+              className="form-input" 
+              type="password" 
+              placeholder="Enter password" 
+              value={password} 
+              onChange={(e) => setPassword(e.target.value)} 
+              required
+            />
+          </div>
+
+          <button 
+            className="btn btn-primary btn-full" 
+            disabled={loading} 
+            type="submit" 
+            style={{ marginTop: '10px', height: '54px', fontSize: '1.1rem' }}
+          >
+            {loading ? "Verifying..." : "Sign In"}
           </button>
         </form>
+
+        <p style={{ marginTop: '30px', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+          Only registered family members can access.
+        </p>
       </div>
     </div>
   );
